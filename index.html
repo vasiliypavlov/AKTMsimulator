@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Adaptive Kernel Task Manager — Resource Monitor</title>
+<style>
+  :root {
+    --bg: #06090f;
+    --panel: #0b1019;
+    --panel-hd: #080c14;
+    --border: #1a2333;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --emerald: #10b981;
+    --sky: #38bdf8;
+    --slate: #475569;
+    --amber: #f59e0b;
+    --rose: #ef4444;
+    --cyan: #22d3ee;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, Segoe UI, sans-serif; line-height: 1.4; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  header {
+    display: flex; align-items: center; justify-content: space-between; padding: 10px 16px;
+    border-bottom: 1px solid var(--border); background: var(--panel-hd);
+  }
+  header h1 { margin: 0; font-size: 15px; font-weight: 700; }
+  .wrap { max-width: 1440px; margin: 0 auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .card-hd { padding: 7px 12px; border-bottom: 1px solid var(--border); background: var(--panel-hd); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); display: flex; justify-content: space-between; align-items: center; }
+  .ctrl-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 9px 12px; }
+  button { cursor: pointer; border-radius: 4px; padding: 5px 9px; font-size: 11px; font-weight: 600; border: 1px solid #243044; background: #111927; color: var(--text); }
+  button.primary { background: var(--emerald); color: #03150e; border-color: var(--emerald); }
+  button.warn { background: rgba(245,158,11,0.18); border-color: rgba(245,158,11,0.5); color: #fcd34d; }
+  button.active { background: rgba(34,211,238,0.16); border-color: rgba(34,211,238,0.5); color: #67e8f9; }
+  button.burst { background: rgba(56,189,248,0.16); border-color: rgba(56,189,248,0.45); color: #bae6fd; }
+  .seg { display: inline-flex; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px; gap: 2px; }
+  .seg button { border: 0; background: transparent; color: var(--muted); padding: 3px 7px; }
+  .seg button.on { background: #1e293b; color: #67e8f9; }
+  .sl-grp { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  input[type="range"] { width: 88px; accent-color: var(--cyan); }
+  .stack-box { padding: 10px 12px; }
+  .stack-bar { height: 14px; width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; display: flex; }
+  .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  @media (max-width: 900px) { .kpis { grid-template-columns: 1fr; } }
+  .kpi { padding: 10px 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { padding: 7px 12px; border-bottom: 1px solid #141c2b; text-align: left; }
+  th { font-size: 11px; color: var(--muted); background: var(--panel-hd); font-weight: 500; }
+  tr.row { cursor: pointer; }
+  tr.row:hover { background: rgba(30,41,59,0.45); }
+  tr.row.sel { background: rgba(34,211,238,0.12); }
+  .matrix-wrap { position: relative; height: 320px; background: var(--bg); }
+  canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+  .bottom { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 1000px) { .bottom { grid-template-columns: 1fr; } }
+  .dual { display: grid; grid-template-columns: 1fr 1fr; }
+  .dual > div { padding: 10px 12px; }
+  .dual > div:first-child { border-right: 1px solid var(--border); }
+  pre { margin: 0; padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; font-size: 11px; overflow-x: auto; }
+  .log-box { height: 185px; overflow-y: auto; padding: 8px 12px; background: var(--bg); font-size: 11px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Adaptive Kernel Task Manager</h1>
+  <div style="display:flex;align-items:center;gap:12px">
+    <span class="seg">
+      <button id="tabMon" class="on" onclick="setMode('monitor')">Монитор ресурсов</button>
+      <button id="tabHelp" onclick="setMode('help')">Справка и принципы</button>
+    </span>
+    <div class="mono" style="font-size:11px;color:var(--muted)" id="hdrPhase">Такт #0 · Готов к прогреву</div>
+  </div>
+</header>
+<div class="wrap" id="helpWrap" style="display:none;max-width:920px">
+  <div class="card" style="padding:20px;line-height:1.6">
+    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:16px">
+      <div>
+        <div class="mono" style="font-size:11px;color:var(--cyan)">Документация пользователя</div>
+        <h2 style="margin:4px 0 0;font-size:20px">Справка: как устроен Adaptive Kernel Task Manager</h2>
+      </div>
+      <button class="primary" onclick="setMode('monitor')">Вернуться в монитор</button>
+    </div>
+    <h3 style="font-size:15px;margin:14px 0 6px">01. В чём суть</h3>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 10px">В отличие от классического каскадного пересчёта графа, ядро управляет пулом ячеек через 4 фракции: <b>RAW_TRAILS</b> (сырой поток), <b>ACTIVE_DETOURS</b> (обход магистрали по тропам без сноса якоря), <b>HIGHWAYS</b> (стабильные макро-узлы с 1 тактом чтения и 0% внимания ИИ) и <b>QUARANTINE_TEARS</b> (2-тактный карантин при сбоях кремния).</p>
+    <h3 style="font-size:15px;margin:14px 0 6px">02. Принципы работы</h3>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 10px">Каждая ячейка адресуется контент-хэшем, при аномалии отводится в сохраненные тропы (<b>FAST_DETOUR</b>), а рассинхрон версий сглаживается через <b>LATTICE_MERGE</b>. Физика железа учитывает стоимость операций: L1 чтение (<b>1t</b>), поиск хэша в CPU+RAM (<b>45t</b>) против Hardware CAM (<b>1t</b>), конфликт кэш-линий False Sharing (<b>+80t</b>) и прерывание драйвера IRQ (<b>+150t</b>).</p>
+    <h3 style="font-size:15px;margin:14px 0 6px">03. Управляемые параметры</h3>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 10px">Размер пула (256/512/1024), архитектура памяти (CPU+RAM vs HW CAM), окно лага (Adaptive vs Fixed), уровень ошибок кремния (0–50%), асимметрия потока (1x–8x), лимит шины IRQ/такт и кнопка <b>Массовый вброс аномалий (15%)</b>.</p>
+    <h3 style="font-size:15px;margin:14px 0 6px">04. Что можно наблюдать</h3>
+    <p style="font-size:13px;color:var(--muted);margin:0">На тактах 1–4 пул зеленеет (HIGHWAYS), а нагрузка на ИИ падает к 0%. В шторме 20% ошибок появляются янтарные блоки карантина и голубые развязки. При превышении IRQ/такт или конфликтах MESI блоки вспыхивают красным, а клик по строке фракции или ячейке матрицы открывает Zero-Copy проекции FoxPro / AI.</p>
+  </div>
+</div>
+<div class="wrap" id="monWrap">
+  <div class="card ctrl-bar">
+    <button class="primary" id="btnRun" onclick="toggleRun()">Старт</button>
+    <button onclick="stepOnce()">Такт</button>
+    <button onclick="resetPool()">Сброс</button>
+    <span class="sl-grp">Пул:
+      <span class="seg">
+        <button id="sz256" onclick="setSize(256)">256</button>
+        <button id="sz512" class="on" onclick="setSize(512)">512</button>
+        <button id="sz1024" onclick="setSize(1024)">1024</button>
+      </span>
+    </span>
+    <span class="sl-grp">Память:
+      <span class="seg">
+        <button id="archCpu" class="on" onclick="setArch('cpu_software')">CPU+RAM (45t)</button>
+        <button id="archCam" onclick="setArch('hardware_cam')">HW CAM (1t)</button>
+      </span>
+    </span>
+    <span class="sl-grp">Лаг:
+      <span class="seg">
+        <button id="lagAdp" class="on" onclick="setLag('adaptive')">Adaptive</button>
+        <button id="lagFix" onclick="setLag('fixed')">Fixed(10)</button>
+      </span>
+    </span>
+    <span class="sl-grp">Ошибки: <input type="range" min="0" max="50" value="20" oninput="setErr(this.value)" /><span class="mono" id="lblErr">20%</span></span>
+    <span class="sl-grp">Асимм: <input type="range" min="1" max="8" value="2" oninput="setAsym(this.value)" /><span class="mono" id="lblAsym">2x</span></span>
+    <span class="sl-grp">IRQ/такт: <input type="range" min="5" max="150" step="5" value="45" oninput="setIrq(this.value)" /><span class="mono" id="lblIrq">0/45</span></span>
+    <button class="burst" onclick="massBurst()">Массовый вброс аномалий (15%)</button>
+  </div>
+
+  <div class="card stack-box">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:8px">
+      <span style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--muted)" id="poolHdr">Распределение пула памяти (512 ячеек)</span>
+      <div class="mono" style="font-size:11px;display:flex;gap:12px;flex-wrap:wrap" id="legendCounts"></div>
+    </div>
+    <div class="stack-bar" id="stackBar"></div>
+  </div>
+
+  <div class="kpis">
+    <div class="card kpi">
+      <div style="font-size:11px;color:var(--muted)">КПД кремния / Простой шины</div>
+      <div class="mono" style="margin-top:4px;display:flex;justify-content:space-between;align-items:baseline">
+        <span style="font-size:22px;font-weight:700;color:var(--emerald)" id="kEff">100.0%</span>
+        <span style="font-size:16px;font-weight:700;color:var(--rose)" id="kStall">0.0% stall</span>
+      </div>
+      <div class="mono" style="font-size:11px;color:var(--muted);margin-top:4px" id="kBreak">Miss: 0t · MESI: 0t · IRQ: 0t</div>
+    </div>
+    <div class="card kpi">
+      <div style="font-size:11px;color:var(--muted)">Нагрузка на ИИ-сопроцессор</div>
+      <div class="mono" style="margin-top:4px;display:flex;justify-content:space-between;align-items:baseline">
+        <span style="font-size:22px;font-weight:700;color:var(--cyan)" id="kAi">100.0%</span>
+        <span style="font-size:12px;color:var(--text)" id="kAiNodes">512 / 512</span>
+      </div>
+      <div style="font-size:11px;color:var(--emerald);margin-top:4px">HIGHWAYS = 0% внимания ИИ</div>
+    </div>
+    <div class="card kpi">
+      <div style="font-size:11px;color:var(--muted)">Выигрыш по тактам (Speedup vs Classic)</div>
+      <div class="mono" style="margin-top:4px;display:flex;justify-content:space-between;align-items:baseline">
+        <span style="font-size:22px;font-weight:700;color:var(--cyan)" id="kSpeedup">1.00×</span>
+        <span style="font-size:11px;color:var(--muted)" id="kCycles">0t / 0t</span>
+      </div>
+      <div class="mono" style="font-size:11px;color:var(--amber);margin-top:4px" id="kStorms">IRQ Storms: 0 · Cache Stalls: 0</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-hd">
+      <span>Процессы ядра · Фракции памяти (клик по строке выделяет фракцию)</span>
+      <button id="btnClearFac" style="display:none" onclick="selectFaction(null)">Сбросить фильтр</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr class="mono">
+            <th>Фракция</th><th>Ячейки (30 тактов)</th><th style="text-align:right">Доля</th><th style="text-align:right">Ср. энтропия</th><th style="text-align:right">Такты шины</th><th>Статус FoxPro / AI</th>
+          </tr>
+        </thead>
+        <tbody id="factionBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-hd">
+      <span>Карта памяти ячеек (Cell Block Matrix)</span>
+      <span class="mono" style="font-size:11px">Клик по блоку — инспектор ячейки</span>
+    </div>
+    <div class="matrix-wrap"><canvas id="matrixCanvas"></canvas></div>
+  </div>
+
+  <div class="bottom">
+    <div class="card">
+      <div class="card-hd"><span>Zero-Copy инспектор</span><span class="mono" id="inspTitle">SRC_0000</span></div>
+      <div class="dual">
+        <div>
+          <div style="font-size:11px;font-weight:600;margin-bottom:6px">Legacy (FoxPro / DBF View)</div>
+          <table class="mono" style="font-size:11px">
+            <tr><th>CELL</th><td id="fpId">SRC_0000</td></tr>
+            <tr><th>TYPE</th><td>FLOAT (10,2)</td></tr>
+            <tr><th>SCALAR</th><td id="fpVal" style="color:var(--cyan);font-weight:700">100.00</td></tr>
+            <tr><th>OVERHEAD</th><td style="color:var(--emerald)">0 B</td></tr>
+          </table>
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;font-size:11px;font-weight:600;margin-bottom:6px">
+            <span>AI / Vector View</span><span class="mono" id="aiFlag">ATTENDING</span>
+          </div>
+          <pre class="mono" id="aiJson">{}</pre>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span>Живой лог драйвера</span></div>
+      <div class="log-box mono" id="logBox"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+function hashStr(s) {
+  let h1 = 0xdeadbeef ^ s.length, h2 = 0x41c6ce57 ^ s.length;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  return ((h2 >>> 0).toString(16).padStart(8,'0') + (h1 >>> 0).toString(16).padStart(8,'0'));
+}
+
+const F_COLORS = { HIGHWAYS: '#10b981', ACTIVE_DETOURS: '#38bdf8', RAW_TRAILS: '#475569', QUARANTINE_TEARS: '#f59e0b' };
+const F_NAMES = {
+  RAW_TRAILS: ['Фракция I · Сырой поток', 'Zero-Copy Read · AI Active'],
+  ACTIVE_DETOURS: ['Фракция II · Гибридные развязки', 'Detour Cached · Anchor Kept'],
+  HIGHWAYS: ['Фракция III · Автомагистрали', 'Zero-Copy L1 · AI Ignored (0%)'],
+  QUARANTINE_TEARS: ['Фракция IV · Карантин сбоев', 'IRQ Throttled · Quarantined'],
+};
+
+let poolSize = 512, hwErr = 0.20, asym = 2, irqCap = 45, memArch = 'cpu_software', lagMode = 'adaptive';
+let nodes = [], tickCount = 0, stormStep = 0, timer = null, selFaction = null, selIdx = 0;
+let stats = { tears: 0, detours: 0, merges: 0, rebuilds: 0, stalls: 0, storms: 0 };
+let cyc = { total: 0, useful: 0, miss: 0, fs: 0, irq: 0, classic: 0, lastIrq: 0 };
+let fHist = { RAW_TRAILS: [], ACTIVE_DETOURS: [], HIGHWAYS: [], QUARANTINE_TEARS: [] };
+let fCycles = { RAW_TRAILS: 0, ACTIVE_DETOURS: 0, HIGHWAYS: 0, QUARANTINE_TEARS: 0 };
+let logs = [], aiAttendNow = 0;
+
+function factionOf(n) {
+  if (n.q > 0) return 'QUARANTINE_TEARS';
+  if (n.abs === 0) return 'RAW_TRAILS';
+  if (n.cd > 0) return 'ACTIVE_DETOURS';
+  return 'HIGHWAYS';
+}
+function entropyOf(n) { return Math.round((n.trails.length / (n.stab + 1)) * 1000) / 1000; }
+
+function initPool() {
+  nodes = []; tickCount = 0; stormStep = 0; logs = [];
+  stats = { tears: 0, detours: 0, merges: 0, rebuilds: 0, stalls: 0, storms: 0 };
+  cyc = { total: 0, useful: 0, miss: 0, fs: 0, irq: 0, classic: 0, lastIrq: 0 };
+  fHist = { RAW_TRAILS: [], ACTIVE_DETOURS: [], HIGHWAYS: [], QUARANTINE_TEARS: [] };
+  const t0 = Math.floor(poolSize / 8), t1 = Math.floor(poolSize / 2);
+  for (let i = 0; i < poolSize; i++) {
+    const pad = String(i).padStart(4, '0');
+    if (i < t0) nodes.push({ idx: i, id: 'SRC_' + pad, tier: 0, val: 100 + (i % 25) * 4, deps: [], ver: 0, abs: 0, stab: 0, hash: null, trails: [], q: 0, cd: 0, tw: false, cyc: 0, flashAt: 0 });
+    else if (i < t1) { const d = i % t0; nodes.push({ idx: i, id: 'MID_' + pad, tier: 1, val: nodes[d].val * 0.2, deps: [d], ver: 0, abs: 0, stab: 0, hash: null, trails: [], q: 0, cd: 0, tw: false, cyc: 0, flashAt: 0 }); }
+    else { const d = t0 + (i % (t1 - t0)), r = nodes[d].deps[0]; nodes.push({ idx: i, id: 'AGG_' + pad, tier: 2, val: nodes[r].val + nodes[d].val, deps: [d, r], ver: 0, abs: 0, stab: 0, hash: null, trails: [], q: 0, cd: 0, tw: false, cyc: 0, flashAt: 0 }); }
+  }
+  aiAttendNow = poolSize; recHist(); renderUI();
+}
+function addLog(cat, msg, color) { logs.unshift({ t: tickCount, cat, msg, color }); if (logs.length > 100) logs.pop(); }
+function recHist() {
+  const cnt = { RAW_TRAILS: 0, ACTIVE_DETOURS: 0, HIGHWAYS: 0, QUARANTINE_TEARS: 0 };
+  for (const n of nodes) cnt[factionOf(n)]++;
+  for (const k in cnt) { fHist[k].push(cnt[k]); if (fHist[k].length > 30) fHist[k].shift(); }
+}
+function chargeLookup(n) {
+  const c = memArch === 'cpu_software' ? 45 : 1;
+  cyc.useful += 1; cyc.miss += (c - 1); cyc.total += c; n.cyc += c;
+}
+function stepOnce() {
+  const now = performance.now();
+  tickCount++; let irqs = 0, stormLogged = false;
+  for (const n of nodes) { n.tw = false; n.cyc = 0; }
+  function regIrq(n) {
+    irqs++; cyc.irq += 150; cyc.total += 150; n.cyc += 150;
+    if (irqs > irqCap) {
+      stats.storms++; n.abs = 0; n.stab = 0; n.hash = null; n.cd = 0; n.flashAt = now;
+      if (!stormLogged) { stormLogged = true; addLog('HARDWARE STALL', 'Шторм прерываний (' + irqs + ' > ' + irqCap + ' IRQ/такт)', '#fb7185'); }
+      return false;
+    }
+    return true;
+  }
+  function mut(n, nv, expVer, bypass) {
+    if (!bypass && Math.random() < hwErr) {
+      stats.tears++; n.q = 2; n.trails.push(['TEAR', nv]); n.tw = true; if (n.trails.length > 24) n.trails.shift();
+      if (!regIrq(n)) return;
+      if (n.trails.filter(x => x[0] === 'TEAR').length >= 5) { stats.rebuilds++; n.abs = 0; n.stab = 0; n.hash = null; n.q = 0; n.cd = 0; n.trails = []; n.flashAt = now; }
+      return;
+    }
+    if (expVer != null && n.deps.length) {
+      const dep = nodes[n.deps[0]], lag = dep.ver - expVer;
+      const eff = lagMode === 'adaptive' ? 10 + Math.floor(entropyOf(n) * 8) + n.trails.length : 10;
+      if (lag > eff) { stats.rebuilds++; n.abs = 0; n.stab = 0; n.hash = null; n.cd = 0; n.trails = []; n.flashAt = now; return; }
+      if (lag > 1) {
+        chargeLookup(n); if (!regIrq(n)) return;
+        stats.merges++; stats.detours++; n.trails.push(['MERGE', nv]); n.tw = true; if (n.trails.length > 24) n.trails.shift();
+        if (n.abs === 1) n.cd = 3; n.val = nv; n.ver++; return;
+      }
+    }
+    chargeLookup(n);
+    if (n.abs === 1) {
+      if (!regIrq(n)) return;
+      stats.detours++; n.trails.push(['DETOUR', nv]); n.tw = true; n.stab = Math.max(0, n.stab - 1); n.cd = 3;
+    } else {
+      n.trails.push(['RAW', nv]); n.tw = true; n.stab = 0;
+    }
+    if (n.trails.length > 24) n.trails.shift();
+    n.val = nv; n.ver++;
+  }
+  if (tickCount > 4) {
+    stormStep++; const s = stormStep, tp = Math.max(1, asym), ttp = Math.max(2, Math.round(asym * 2.5));
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      if (n.tier === 0 && (i + s) % 3 === 0) mut(n, n.val + 1.5, null, false);
+      else if (n.tier === 1 && (s + i) % tp === 0 && (i % 4 === s % 4)) mut(n, nodes[n.deps[0]].val * 0.2, Math.max(0, nodes[n.deps[0]].ver - 1), false);
+      else if (n.tier === 2 && (s + i) % ttp === 0 && (i % 5 === s % 5)) mut(n, nodes[n.deps[1]].val + nodes[n.deps[0]].val, Math.max(0, nodes[n.deps[0]].ver - 1), false);
+    }
+  }
+  let ev = 0, att = 0;
+  fCycles = { RAW_TRAILS: 0, ACTIVE_DETOURS: 0, HIGHWAYS: 0, QUARANTINE_TEARS: 0 };
+  for (const n of nodes) {
+    const def = n.trails.filter(x => x[0] === 'TEAR');
+    if (def.length && n.q === 0) { n.val = def[def.length - 1][1]; n.ver++; n.trails = n.trails.filter(x => x[0] !== 'TEAR'); n.tw = true; chargeLookup(n); }
+    if (n.q > 0) n.q--; else { if (n.cd > 0) n.cd--; n.stab++; if (n.stab >= 3 && n.abs === 0) { n.abs = 1; n.hash = hashStr(n.id + ':' + n.val.toFixed(2) + ':' + n.ver); chargeLookup(n); ev++; } }
+    cyc.useful++; cyc.total++; n.cyc++;
+    const needAi = n.q > 0 || n.abs === 0 || (n.cd > 0 && entropyOf(n) >= 0.6);
+    if (needAi) {
+      att++; if (n.abs === 1) { cyc.useful++; cyc.total++; n.cyc++; } else chargeLookup(n);
+      if (n.tw) { stats.stalls++; cyc.fs += 80; cyc.total += 80; n.cyc += 80; n.flashAt = now; }
+    }
+    cyc.classic += 60;
+    fCycles[factionOf(n)] += n.cyc;
+  }
+  aiAttendNow = att; cyc.lastIrq = irqs;
+  if (ev > 0) addLog('ЭВОЛЮЦИЯ', ev + ' ячеек перешли в HIGHWAYS', '#34d399');
+  recHist(); renderUI();
+}
+function massBurst() {
+  const now = performance.now(); tickCount++; let irqs = 0;
+  let cands = nodes.filter(n => factionOf(n) === 'HIGHWAYS');
+  if (!cands.length) cands = [...nodes];
+  const hit = Math.max(1, Math.round(cands.length * 0.15));
+  for (let i = 0; i < hit; i++) {
+    const n = cands[Math.floor(Math.random() * cands.length)];
+    irqs++; cyc.irq += 150; cyc.total += 150;
+    if (irqs > irqCap) { stats.storms++; n.abs = 0; n.stab = 0; n.hash = null; n.cd = 0; n.flashAt = now; }
+    else { stats.detours++; n.cd = 3; n.stab = Math.max(0, n.stab - 1); n.val = n.val * 1.25 + 10; n.ver++; n.trails.push(['DETOUR', n.val]); }
+  }
+  cyc.lastIrq = irqs;
+  addLog('ДРАЙВЕР', 'Массовый вброс по ' + hit + ' магистралям (IRQ: ' + irqs + '/' + irqCap + ')', '#38bdf8');
+  recHist(); renderUI();
+}
+function toggleRun() { if (timer) { clearInterval(timer); timer = null; document.getElementById('btnRun').textContent = 'Старт'; } else { timer = setInterval(stepOnce, 550); document.getElementById('btnRun').textContent = 'Пауза'; } }
+function resetPool() { if (timer) toggleRun(); initPool(); }
+function setSize(s) { poolSize = s; ['256','512','1024'].forEach(k => document.getElementById('sz'+k).classList.toggle('on', Number(k)===s)); resetPool(); }
+function setMode(m) {
+  document.getElementById('monWrap').style.display = m === 'monitor' ? 'flex' : 'none';
+  document.getElementById('helpWrap').style.display = m === 'help' ? 'flex' : 'none';
+  document.getElementById('tabMon').classList.toggle('on', m === 'monitor');
+  document.getElementById('tabHelp').classList.toggle('on', m === 'help');
+}
+function setArch(a) { memArch = a; document.getElementById('archCpu').classList.toggle('on', a==='cpu_software'); document.getElementById('archCam').classList.toggle('on', a==='hardware_cam'); }
+function setLag(m) { lagMode = m; document.getElementById('lagAdp').classList.toggle('on', m==='adaptive'); document.getElementById('lagFix').classList.toggle('on', m==='fixed'); }
+function setErr(v) { hwErr = v / 100; document.getElementById('lblErr').textContent = v + '%'; }
+function setAsym(v) { asym = Number(v); document.getElementById('lblAsym').textContent = v + 'x'; }
+function setIrq(v) { irqCap = Number(v); renderUI(); }
+function selectFaction(f) { selFaction = selFaction === f ? null : f; if (selFaction) { const r = nodes.find(n => factionOf(n) === selFaction); if (r) selIdx = r.idx; } renderUI(); }
+
+function sparkSvg(arr, color) {
+  if (arr.length < 2) return '<svg width="84" height="20"></svg>';
+  const pts = arr.map((v, i) => ((i / (arr.length - 1)) * 84).toFixed(1) + ',' + (18 - (v / poolSize) * 16).toFixed(1)).join(' ');
+  return '<svg width="84" height="20"><polyline fill="none" stroke="' + color + '" stroke-width="1.6" points="' + pts + '"/></svg>';
+}
+
+function renderUI() {
+  document.getElementById('hdrPhase').textContent = 'Такт #' + tickCount + ' · ' + (tickCount <= 4 ? 'Фаза прогрева' : 'Асимметричный шторм');
+  document.getElementById('poolHdr').textContent = 'Распределение пула памяти (' + poolSize + ' ячеек)';
+  document.getElementById('lblIrq').textContent = cyc.lastIrq + '/' + irqCap;
+  const cnt = { RAW_TRAILS: 0, ACTIVE_DETOURS: 0, HIGHWAYS: 0, QUARANTINE_TEARS: 0 };
+  const entSum = { RAW_TRAILS: 0, ACTIVE_DETOURS: 0, HIGHWAYS: 0, QUARANTINE_TEARS: 0 };
+  for (const n of nodes) { const f = factionOf(n); cnt[f]++; entSum[f] += entropyOf(n); }
+  const order = ['HIGHWAYS', 'ACTIVE_DETOURS', 'RAW_TRAILS', 'QUARANTINE_TEARS'];
+  document.getElementById('stackBar').innerHTML = order.map(k => '<div onclick="selectFaction(\'' + k + '\')" style="width:' + (cnt[k]/poolSize*100) + '%;background:' + F_COLORS[k] + ';cursor:pointer"></div>').join('');
+  document.getElementById('legendCounts').innerHTML = order.map(k => '<span style="color:' + F_COLORS[k] + '">' + k + ': ' + cnt[k] + ' (' + (cnt[k]/poolSize*100).toFixed(1) + '%)</span>').join('');
+  const eff = cyc.total ? (cyc.useful / cyc.total * 100) : 100;
+  const stl = cyc.total ? ((cyc.miss + cyc.fs + cyc.irq) / cyc.total * 100) : 0;
+  document.getElementById('kEff').textContent = eff.toFixed(1) + '%';
+  document.getElementById('kStall').textContent = stl.toFixed(1) + '% stall';
+  document.getElementById('kBreak').textContent = 'Miss: ' + cyc.miss + 't · MESI: ' + cyc.fs + 't · IRQ: ' + cyc.irq + 't';
+  document.getElementById('kAi').textContent = (aiAttendNow / poolSize * 100).toFixed(1) + '%';
+  document.getElementById('kAiNodes').textContent = aiAttendNow + ' / ' + poolSize;
+  document.getElementById('kSpeedup').textContent = (cyc.total ? (cyc.classic / cyc.total).toFixed(2) : '1.00') + '×';
+  document.getElementById('kCycles').textContent = cyc.total + 't / ' + cyc.classic + 't';
+  document.getElementById('kStorms').textContent = 'IRQ Storms: ' + stats.storms + ' · Cache Stalls: ' + stats.stalls;
+  document.getElementById('btnClearFac').style.display = selFaction ? 'inline-block' : 'none';
+  document.getElementById('factionBody').innerHTML = ['RAW_TRAILS','ACTIVE_DETOURS','HIGHWAYS','QUARANTINE_TEARS'].map(k => {
+    const avgE = cnt[k] ? (entSum[k] / cnt[k]).toFixed(3) : '0.000';
+    return '<tr class="row ' + (selFaction===k?'sel':'') + '" onclick="selectFaction(\'' + k + '\')">' +
+      '<td><span style="display:inline-block;width:9px;height:9px;background:' + F_COLORS[k] + ';margin-right:8px"></span>' + F_NAMES[k][0] + '</td>' +
+      '<td class="mono"><div style="display:flex;align-items:center;gap:8px"><b>' + cnt[k] + '</b>' + sparkSvg(fHist[k], F_COLORS[k]) + '</div></td>' +
+      '<td class="mono" style="text-align:right">' + (cnt[k]/poolSize*100).toFixed(1) + '%</td>' +
+      '<td class="mono" style="text-align:right">' + avgE + '</td>' +
+      '<td class="mono" style="text-align:right">' + fCycles[k] + ' t</td>' +
+      '<td class="mono" style="font-size:11px;color:var(--muted)">' + F_NAMES[k][1] + '</td></tr>';
+  }).join('');
+  const sn = nodes[selIdx] || nodes[0];
+  if (sn) {
+    document.getElementById('inspTitle').textContent = sn.id + ' · ' + factionOf(sn);
+    document.getElementById('fpId').textContent = sn.id;
+    document.getElementById('fpVal').textContent = sn.val.toFixed(2);
+    const att = sn.q > 0 || sn.abs === 0 || (sn.cd > 0 && entropyOf(sn) >= 0.6);
+    const fl = document.getElementById('aiFlag'); fl.textContent = att ? 'ATTENDING' : 'IGNORED (0% AI)'; fl.style.color = att ? '#fb7185' : '#34d399';
+    document.getElementById('aiJson').textContent = JSON.stringify({ id: sn.id, faction: factionOf(sn), anchor_hash: sn.hash || hashStr(sn.id+':'+sn.val.toFixed(2)+':'+sn.ver), mode: sn.abs===1?'HIGHWAY':'TRAIL', entropy: entropyOf(sn), version: sn.ver, active_trails: sn.trails.length }, null, 2);
+  }
+  document.getElementById('logBox').innerHTML = logs.map(l => '<div><span style="color:#64748b">t=' + String(l.t).padStart(3,'0') + '</span> <span style="color:' + l.color + '">[' + l.cat + ']</span> ' + l.msg + '</div>').join('');
+}
+
+const canvas = document.getElementById('matrixCanvas');
+canvas.addEventListener('click', e => {
+  const r = canvas.getBoundingClientRect(), cols = poolSize === 256 ? 16 : 32, rows = poolSize === 1024 ? 32 : 16;
+  const col = Math.floor(((e.clientX - r.left) - 10) / ((r.width - 20) / cols)), row = Math.floor(((e.clientY - r.top) - 10) / ((r.height - 20) / rows));
+  const idx = row * cols + col; if (idx >= 0 && idx < nodes.length) { selIdx = idx; renderUI(); }
+});
+function drawMatrix(now) {
+  const r = canvas.parentElement.getBoundingClientRect();
+  if (canvas.width !== Math.floor(r.width) || canvas.height !== Math.floor(r.height)) { canvas.width = Math.max(1, Math.floor(r.width)); canvas.height = Math.max(1, Math.floor(r.height)); }
+  const ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
+  ctx.fillStyle = '#06090f'; ctx.fillRect(0, 0, w, h);
+  const cols = poolSize === 256 ? 16 : 32, rows = poolSize === 1024 ? 32 : 16, pad = 10, gap = poolSize === 1024 ? 2 : 3;
+  const cw = Math.max(4, (w - pad*2 - gap*(cols-1)) / cols), ch = Math.max(4, (h - pad*2 - gap*(rows-1)) / rows);
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i], x = pad + (i % cols) * (cw + gap), y = pad + Math.floor(i / cols) * (ch + gap), f = factionOf(n);
+    ctx.globalAlpha = (selFaction && selFaction !== f) ? 0.16 : 0.95;
+    ctx.fillStyle = F_COLORS[f]; ctx.fillRect(x, y, cw, ch);
+    if (now - n.flashAt < 650) { ctx.globalAlpha = (1 - (now - n.flashAt)/650); ctx.fillStyle = '#ef4444'; ctx.fillRect(x, y, cw, ch); }
+    if (i === selIdx) { ctx.globalAlpha = 1; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.strokeRect(x-1, y-1, cw+2, ch+2); }
+  }
+  ctx.globalAlpha = 1; requestAnimationFrame(drawMatrix);
+}
+initPool(); requestAnimationFrame(drawMatrix);
+</script>
+</body>
+</html>
