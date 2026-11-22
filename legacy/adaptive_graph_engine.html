@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Adaptive Graph Engine — Standalone Simulator</title>
+<style>
+  :root {
+    --bg: #070b12;
+    --panel: #0d131f;
+    --panel-alt: #0a101b;
+    --border: #1e293b;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --cyan: #06b6d4;
+    --emerald: #10b981;
+    --amber: #f59e0b;
+    --purple: #a855f7;
+    --rose: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+    line-height: 1.45;
+  }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  header {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--panel-alt);
+  }
+  header h1 { margin: 0; font-size: 16px; font-weight: 700; }
+  .wrap { max-width: 1440px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  .stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 1024px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+  .stat-lbl { font-size: 11px; color: var(--muted); }
+  .stat-val { font-size: 22px; font-weight: 700; margin-top: 2px; }
+  .main { display: grid; grid-template-columns: 1.45fr 1fr; gap: 14px; }
+  @media (max-width: 1100px) { .main { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
+  .card-hd { padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--panel-alt); display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 600; }
+  .canvas-box { position: relative; min-height: 440px; flex: 1; }
+  canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+  .controls { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  .btn-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  button {
+    cursor: pointer; border-radius: 6px; padding: 8px 10px; font-size: 12px; font-weight: 600;
+    border: 1px solid var(--border); background: #131c2e; color: var(--text);
+  }
+  button.primary { background: var(--cyan); color: #041218; border-color: var(--cyan); }
+  button.anomaly { background: rgba(16,185,129,0.15); border-color: rgba(16,185,129,0.45); color: #a7f3d0; width: 100%; }
+  button.active { background: rgba(6,182,212,0.18); border-color: var(--cyan); color: #67e8f9; }
+  .slider-row label { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
+  input[type="range"] { width: 100%; accent-color: var(--cyan); }
+  .dual { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--border); }
+  @media (max-width: 700px) { .dual { grid-template-columns: 1fr; } }
+  .dual > div { padding: 12px; }
+  .dual > div:first-child { border-right: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  th, td { padding: 5px 8px; border-bottom: 1px solid var(--border); text-align: left; }
+  pre { margin: 0; padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; font-size: 11px; overflow-x: auto; }
+  .log-box { height: 180px; overflow-y: auto; padding: 10px 14px; background: var(--bg); font-size: 12px; }
+  .log-line { padding: 2px 0; border-bottom: 1px solid #0f172a; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Adaptive Graph Engine</h1>
+  <div class="mono" style="font-size:12px;color:var(--muted)" id="phaseText">Готов к прогреву</div>
+</header>
+<div class="wrap">
+  <div class="stats">
+    <div class="stat"><div class="stat-lbl">Сбои железа (Tears)</div><div class="stat-val mono" style="color:var(--amber)" id="sTears">0</div></div>
+    <div class="stat"><div class="stat-lbl">Обходы по тропам (Detours)</div><div class="stat-val mono" style="color:var(--emerald)" id="sDetours">0</div></div>
+    <div class="stat"><div class="stat-lbl">Слияния решеток (Merges)</div><div class="stat-val mono" style="color:var(--purple)" id="sMerges">0</div></div>
+    <div class="stat"><div class="stat-lbl">Аварийные пересборки</div><div class="stat-val mono" style="color:var(--rose)" id="sRebuilds">0</div></div>
+    <div class="stat"><div class="stat-lbl">Сэкономленные вычисления ИИ</div><div class="stat-val mono" style="color:var(--cyan)" id="sAiSaved">0.0%</div></div>
+  </div>
+
+  <div class="main">
+    <div class="card">
+      <div class="card-hd">
+        <span>Топология графа (PRICE -> TAX -> TOTAL)</span>
+        <div style="display:flex;gap:6px">
+          <button onclick="addExtra('DISCOUNT')">+ DISCOUNT</button>
+          <button onclick="addExtra('FX_EUR')">+ FX_EUR</button>
+          <button onclick="addExtra('AUDIT')">+ AUDIT</button>
+        </div>
+      </div>
+      <div class="canvas-box"><canvas id="graphCanvas"></canvas></div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="card">
+        <div class="card-hd"><span>Пульт управления штормом</span></div>
+        <div class="controls">
+          <div class="btn-row">
+            <button class="primary" id="btnToggle" onclick="toggleRun()">Старт</button>
+            <button onclick="stepOnce()">Один такт</button>
+            <button onclick="resetSim()">Сброс</button>
+          </div>
+          <div class="slider-row">
+            <label><span>Уровень ошибок железа (hw_error_rate)</span><span class="mono" id="errLabel">20%</span></label>
+            <input type="range" min="0" max="50" value="20" oninput="setErr(this.value)" />
+          </div>
+          <div class="slider-row">
+            <label><span>Асимметрия потока</span><span class="mono" id="asymLabel">2x</span></label>
+            <input type="range" min="1" max="5" value="2" oninput="setAsym(this.value)" />
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <button id="btnAdaptive" class="active" onclick="setLagMode('adaptive')">Adaptive max_lag</button>
+            <button id="btnFixed" onclick="setLagMode('fixed')">Fixed max_lag (10)</button>
+          </div>
+          <button class="anomaly" onclick="injectAnomaly()">Впрыснуть аномалию в магистраль</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hd"><span>Два мира — одна память (Zero-Copy)</span><span class="mono" id="selNodeLabel">PRICE</span></div>
+        <div class="dual">
+          <div>
+            <div style="font-size:12px;font-weight:600;margin-bottom:6px">Legacy (FoxPro / DBF View)</div>
+            <table class="mono">
+              <tr><th>ID</th><td id="fpId">PRICE</td></tr>
+              <tr><th>TYPE</th><td>FLOAT (10,2)</td></tr>
+              <tr><th>VALUE</th><td id="fpVal" style="color:var(--cyan);font-weight:700">100.00</td></tr>
+              <tr><th>OVERHEAD</th><td style="color:var(--emerald)">0 B</td></tr>
+            </table>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin-bottom:6px">
+              <span>AI / Vector View</span>
+              <span class="mono" id="aiStatus">ATTENDING</span>
+            </div>
+            <pre class="mono" id="aiJson">{}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-hd"><span>Живой лог драйвера</span></div>
+    <div class="log-box mono" id="logBox"></div>
+  </div>
+</div>
+
+<script>
+// Compact FNV/BLAKE-style 64-bit deterministic content hash for offline HTML export
+function contentHash(str) {
+  let h1 = 0xdeadbeef ^ str.length, h2 = 0x41c6ce57 ^ str.length;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return ((h2 >>> 0).toString(16).padStart(8,'0') + (h1 >>> 0).toString(16).padStart(8,'0'));
+}
+
+class AdaptiveNode {
+  constructor(id, val, deps, pos) {
+    this.node_id = id; this.val = val; this.deps = deps || []; this.pos = pos;
+    this.version = 0; this.abstraction_level = 0; this.stability = 0;
+    this.highway_hash = null; this.trails = []; this.quarantine_ticks = 0;
+  }
+  computeHash() {
+    const r = Math.round(this.val * 10000) / 10000;
+    return contentHash(this.node_id + ':' + (Number.isInteger(r) ? r.toFixed(1) : r) + ':' + this.version);
+  }
+  get entropy() { return Math.round((this.trails.length / (this.stability + 1)) * 1000) / 1000; }
+  tryEvolve(logFn) {
+    if (this.quarantine_ticks > 0) { this.quarantine_ticks -= 1; return; }
+    this.stability += 1;
+    if (this.stability >= 3 && this.abstraction_level === 0) {
+      this.abstraction_level = 1;
+      this.highway_hash = this.computeHash();
+      logFn('ЭВОЛЮЦИЯ', "'" + this.node_id + "' -> АВТОМАГИСТРАЛЬ (Hash: " + this.highway_hash + ")", '#67e8f9');
+    }
+  }
+  read(ctx) {
+    if (ctx === 'foxpro') return Math.round(this.val * 100) / 100;
+    return {
+      id: this.node_id, anchor_hash: this.highway_hash || this.computeHash(),
+      mode: this.abstraction_level === 1 ? 'HIGHWAY' : 'TRAIL',
+      entropy: this.entropy, version: this.version,
+      active_trails: this.trails.length, in_quarantine: this.quarantine_ticks > 0
+    };
+  }
+}
+
+let engine, timer = null, selectedId = 'PRICE';
+function initEngine() {
+  engine = {
+    nodes: new Map(), hw_error_rate: 0.20, base_max_lag: 10, max_deferred: 5,
+    lag_mode: 'adaptive', asymmetry: 2, tickCount: 0, stormStep: 0,
+    stats: { hw_tears: 0, trail_detours: 0, lattice_merges: 0, catastrophic_rebuilds: 0 },
+    aiTotal: 0, aiSkipped: 0, logs: [], pulses: [], shockwaves: []
+  };
+  engine.nodes.set('PRICE', new AdaptiveNode('PRICE', 100, [], {x:0.2, y:0.5}));
+  engine.nodes.set('TAX', new AdaptiveNode('TAX', 20, ['PRICE'], {x:0.5, y:0.28}));
+  engine.nodes.set('TOTAL', new AdaptiveNode('TOTAL', 120, ['PRICE','TAX'], {x:0.68, y:0.58}));
+}
+function addLog(cat, msg, color) {
+  engine.logs.unshift({ t: engine.tickCount, cat, msg, color });
+  if (engine.logs.length > 100) engine.logs.pop();
+}
+function rebuild(reason) {
+  engine.stats.catastrophic_rebuilds += 1;
+  addLog('ПЕРЕСБОРКА', reason, '#fb7185');
+  engine.shockwaves.push({ t: performance.now() });
+  for (const n of engine.nodes.values()) {
+    n.abstraction_level = 0; n.stability = 0; n.highway_hash = null; n.quarantine_ticks = 0; n.trails = [];
+  }
+  const p = engine.nodes.get('PRICE'), tx = engine.nodes.get('TAX'), tt = engine.nodes.get('TOTAL');
+  if (p && tx && tt) {
+    tx.val = Math.round(p.val * 0.2 * 100) / 100; tx.version = p.version;
+    tt.val = Math.round((p.val + tx.val) * 100) / 100; tt.version = p.version;
+  }
+}
+function mutate(id, newVal, expectedDepVer) {
+  const n = engine.nodes.get(id); if (!n) return false;
+  if (Math.random() < engine.hw_error_rate) {
+    engine.stats.hw_tears += 1; n.quarantine_ticks = 2;
+    n.trails.push(['TEAR_DEFERRED', newVal, n.version]);
+    if (n.trails.length > 24) n.trails.shift();
+    addLog('СБОЙ КРЕМНИЯ', "'" + id + "' -> карантин (" + newVal.toFixed(2) + ")", '#fbbf24');
+    if (n.trails.filter(x => x[0] === 'TEAR_DEFERRED').length >= engine.max_deferred) rebuild("Переполнение карантина в '" + id + "'");
+    return false;
+  }
+  if (expectedDepVer != null && n.deps.length) {
+    const dep = engine.nodes.get(n.deps[0]);
+    const lag = dep.version - expectedDepVer;
+    const eff = engine.lag_mode === 'adaptive' ? engine.base_max_lag + Math.floor(n.entropy * 8) + n.trails.length : engine.base_max_lag;
+    if (lag > eff) { rebuild("Темпоральный разрыв '" + id + "' (lag=" + lag + " > " + eff + ")"); return false; }
+    if (lag > 1) {
+      engine.stats.lattice_merges += 1; engine.stats.trail_detours += 1;
+      n.trails.push(['LATTICE_MERGE', n.val, newVal]); if (n.trails.length > 24) n.trails.shift();
+      n.val = newVal; n.version += 1;
+      engine.pulses.push({ to: id, kind: 'MERGE', t: performance.now() });
+      addLog('СЛИЯНИЕ РЕШЕТКИ', "'" + id + "' догнал '" + dep.node_id + "' (lag=" + lag + "/" + eff + ")", '#c084fc');
+      return true;
+    }
+  }
+  if (n.abstraction_level === 1) {
+    engine.stats.trail_detours += 1;
+    n.trails.push(['FAST_DETOUR', n.val, newVal]); n.stability = Math.max(0, n.stability - 1);
+    engine.pulses.push({ to: id, kind: 'DETOUR', t: performance.now() });
+    addLog('ДРАЙВЕР', "Обход магистрали '" + id + "': " + n.val.toFixed(2) + " -> " + newVal.toFixed(2), '#6ee7b7');
+  } else {
+    n.trails.push(['RAW_WRITE', n.val, newVal]); n.stability = 0;
+  }
+  if (n.trails.length > 24) n.trails.shift();
+  n.val = newVal; n.version += 1;
+  return true;
+}
+function tickEngine() {
+  for (const n of engine.nodes.values()) {
+    const def = n.trails.filter(x => x[0] === 'TEAR_DEFERRED');
+    if (def.length && n.quarantine_ticks === 0) {
+      n.val = def[def.length - 1][1]; n.version += 1;
+      n.trails = n.trails.filter(x => x[0] !== 'TEAR_DEFERRED');
+      addLog('ВОССТАНОВЛЕНИЕ', "Карантин '" + n.node_id + "' влит", '#5eead4');
+    }
+    n.tryEvolve(addLog);
+    engine.aiTotal += 1;
+    if (n.abstraction_level === 1 && n.entropy < 0.6 && n.quarantine_ticks === 0) engine.aiSkipped += 1;
+  }
+}
+function stepOnce() {
+  engine.tickCount += 1;
+  if (engine.tickCount > 4) {
+    engine.stormStep += 1;
+    const s = engine.stormStep, p = 100 + s * 2.5;
+    mutate('PRICE', p, null);
+    const tp = Math.max(1, engine.asymmetry), ttp = Math.max(2, Math.round(engine.asymmetry * 2.5));
+    const pn = engine.nodes.get('PRICE'), tn = engine.nodes.get('TAX'), ttn = engine.nodes.get('TOTAL');
+    if (tn && s % tp === 0) mutate('TAX', p * 0.2, pn.version - 1);
+    if (ttn && s % ttp === 0) mutate('TOTAL', pn.val + tn.val, tn.version - 1);
+    if (engine.nodes.has('DISCOUNT') && s % (tp + 1) === 0) mutate('DISCOUNT', p * 0.1, pn.version - 1);
+    if (engine.nodes.has('FX_EUR') && s % (ttp + 1) === 0) mutate('FX_EUR', ttn.val * 0.92, ttn.version - 1);
+    if (engine.nodes.has('AUDIT') && s % (ttp + 2) === 0) mutate('AUDIT', ttn.val, ttn.version - 1);
+  }
+  tickEngine();
+  updateUI();
+}
+function toggleRun() {
+  if (timer) { clearInterval(timer); timer = null; document.getElementById('btnToggle').textContent = 'Старт'; }
+  else { timer = setInterval(stepOnce, 650); document.getElementById('btnToggle').textContent = 'Пауза'; }
+}
+function resetSim() {
+  if (timer) toggleRun();
+  initEngine(); updateUI();
+}
+function setErr(v) { engine.hw_error_rate = v / 100; document.getElementById('errLabel').textContent = v + '%'; }
+function setAsym(v) { engine.asymmetry = Number(v); document.getElementById('asymLabel').textContent = v + 'x'; }
+function setLagMode(m) {
+  engine.lag_mode = m;
+  document.getElementById('btnAdaptive').classList.toggle('active', m === 'adaptive');
+  document.getElementById('btnFixed').classList.toggle('active', m === 'fixed');
+}
+function injectAnomaly() {
+  const arr = Array.from(engine.nodes.values()).sort((a,b) => (b.abstraction_level - a.abstraction_level) || (b.stability - a.stability));
+  const t = arr[0]; const prev = engine.hw_error_rate; engine.hw_error_rate = 0;
+  engine.tickCount += 1; mutate(t.node_id, t.val * 1.35 + 15, null); engine.hw_error_rate = prev; updateUI();
+}
+function addExtra(id) {
+  if (engine.nodes.has(id)) return;
+  if (id === 'DISCOUNT') engine.nodes.set(id, new AdaptiveNode(id, 10, ['PRICE'], {x:0.35, y:0.78}));
+  if (id === 'FX_EUR') engine.nodes.set(id, new AdaptiveNode(id, 110, ['TOTAL'], {x:0.82, y:0.25}));
+  if (id === 'AUDIT') engine.nodes.set(id, new AdaptiveNode(id, 120, ['TOTAL'], {x:0.82, y:0.78}));
+  updateUI();
+}
+function updateUI() {
+  document.getElementById('sTears').textContent = engine.stats.hw_tears;
+  document.getElementById('sDetours').textContent = engine.stats.trail_detours;
+  document.getElementById('sMerges').textContent = engine.stats.lattice_merges;
+  document.getElementById('sRebuilds').textContent = engine.stats.catastrophic_rebuilds;
+  document.getElementById('sAiSaved').textContent = (engine.aiTotal ? (engine.aiSkipped / engine.aiTotal * 100).toFixed(1) : '0.0') + '%';
+  document.getElementById('phaseText').textContent = engine.tickCount <= 4 ? 'Фаза 1: Прогрев (' + engine.tickCount + '/4)' : 'Фаза 2: Шторм · Такт #' + engine.tickCount;
+  const sel = engine.nodes.get(selectedId) || engine.nodes.get('PRICE');
+  document.getElementById('selNodeLabel').textContent = sel.node_id;
+  document.getElementById('fpId').textContent = sel.node_id;
+  document.getElementById('fpVal').textContent = sel.read('foxpro').toFixed(2);
+  const att = !(sel.abstraction_level === 1 && sel.entropy < 0.6 && sel.quarantine_ticks === 0);
+  const stEl = document.getElementById('aiStatus');
+  stEl.textContent = att ? 'ATTENDING (High Entropy)' : 'IGNORED (Low Entropy)';
+  stEl.style.color = att ? '#fb7185' : '#67e8f9';
+  document.getElementById('aiJson').textContent = JSON.stringify(sel.read('ai_vector'), null, 2);
+  document.getElementById('logBox').innerHTML = engine.logs.map(l => '<div class="log-line"><span style="color:#64748b">t=' + String(l.t).padStart(3,'0') + '</span> <span style="color:' + l.color + '">[' + l.cat + ']</span> ' + l.msg + '</div>').join('');
+}
+
+const canvas = document.getElementById('graphCanvas');
+canvas.addEventListener('click', e => {
+  const r = canvas.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  for (const n of engine.nodes.values()) {
+    if (Math.hypot(mx - n.pos.x * r.width, my - n.pos.y * r.height) < 50) { selectedId = n.node_id; updateUI(); break; }
+  }
+});
+
+function render(now) {
+  const r = canvas.parentElement.getBoundingClientRect();
+  if (canvas.width !== Math.floor(r.width) || canvas.height !== Math.floor(r.height)) {
+    canvas.width = Math.max(1, Math.floor(r.width)); canvas.height = Math.max(1, Math.floor(r.height));
+  }
+  const ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
+  ctx.fillStyle = '#070b12'; ctx.fillRect(0, 0, w, h);
+  engine.pulses = engine.pulses.filter(p => now - p.t < 800);
+  engine.shockwaves = engine.shockwaves.filter(s => now - s.t < 1100);
+  for (const sw of engine.shockwaves) {
+    const p = (now - sw.t) / 1100;
+    ctx.beginPath(); ctx.arc(w/2, h/2, p * Math.hypot(w, h) * 0.7, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(239,68,68,' + (1 - p) + ')'; ctx.lineWidth = 5; ctx.stroke();
+  }
+  for (const n of engine.nodes.values()) {
+    for (const dId of n.deps) {
+      const d = engine.nodes.get(dId); if (!d) continue;
+      ctx.beginPath(); ctx.moveTo(d.pos.x * w, d.pos.y * h); ctx.lineTo(n.pos.x * w, n.pos.y * h);
+      ctx.strokeStyle = 'rgba(100,116,139,0.4)'; ctx.lineWidth = 2; ctx.stroke();
+    }
+  }
+  for (const n of engine.nodes.values()) {
+    const x = n.pos.x * w, y = n.pos.y * h, rad = 42;
+    if (n.entropy > 0.05) {
+      const g = ctx.createRadialGradient(x, y, 24, x, y, 74);
+      g.addColorStop(0, 'rgba(239,68,68,' + Math.min(0.45, n.entropy * 0.2) + ')');
+      g.addColorStop(1, 'rgba(239,68,68,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 74, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(x, y, rad + 5, 0, Math.PI * 2);
+    ctx.strokeStyle = n.abstraction_level === 1 ? '#06b6d4' : '#475569';
+    ctx.lineWidth = n.abstraction_level === 1 ? 4 : 1.5; ctx.stroke();
+    if (n.quarantine_ticks > 0) {
+      ctx.beginPath(); ctx.arc(x, y, rad + 11, 0, Math.PI * 2);
+      ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2.5; ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2);
+    ctx.fillStyle = '#0d131f'; ctx.fill(); ctx.strokeStyle = n.node_id === selectedId ? '#e2e8f0' : '#1e293b'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.textAlign = 'center'; ctx.fillStyle = '#67e8f9'; ctx.font = 'bold 11px sans-serif'; ctx.fillText(n.node_id, x, y - 12);
+    ctx.fillStyle = '#f8fafc'; ctx.font = 'bold 13px monospace'; ctx.fillText(n.read('foxpro').toFixed(2), x, y + 5);
+    ctx.fillStyle = '#94a3b8'; ctx.font = '10px monospace'; ctx.fillText('v' + n.version + ' tr:' + n.trails.length, x, y + 20);
+  }
+  requestAnimationFrame(render);
+}
+
+initEngine(); updateUI(); requestAnimationFrame(render);
+</script>
+</body>
+</html>
