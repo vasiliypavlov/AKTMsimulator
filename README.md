@@ -2,7 +2,7 @@
 
 Небольшой интерактивный эксперимент о том, как можно подружить старый детерминированный код (условный FoxPro или 1С) с современными ИИ-агентами и векторными базами без тяжелых виртуальных машин, JSON-сериализации и лишнего пересчета данных.
 
-[![Interactive Demo](https://img.shields.io/badge/Interactive_Demo-Open_Web_App-blue?style=for-the-badge&logo=googlechrome&logoColor=white)]([https://vasiliypavlov.github.io/AKTMsimulator/](https://vasiliypavlov.github.io/AKTMsimulator/))
+[![Interactive Demo](https://img.shields.io/badge/Interactive_Demo-Open_Web_App-blue?style=for-the-badge&logo=googlechrome&logoColor=white)](https://vasiliypavlov.github.io/AKTMsimulator/)
 
 ## В чем проблема?
 Сегодня старые учетные системы и ИИ живут в разных мирах. Чтобы нейросеть поняла, что происходит в базе, данные приходится гонять по сети, перекладывать в JSON, скармливать в промпты и заново пересчитывать то, что и так жестко задано правилами. В итоге дата-центры тратят кучу энергии на перекладывание пустых байтов и генерацию «мусора».
